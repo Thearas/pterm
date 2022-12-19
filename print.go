@@ -114,7 +114,7 @@ func Fprint(writer io.Writer, a ...interface{}) {
 	}
 
 	for _, spinner := range activeSpinnerPrinters {
-		if spinner.IsActive && spinner.Writer == writer {
+		if spinner.isActive() && spinner.Writer == writer {
 			ret += sClearLine()
 			ret += Sprinto(a...)
 			printed = true
@@ -149,9 +149,10 @@ func Fprintln(writer io.Writer, a ...interface{}) {
 // Printo overrides the current line in a terminal.
 // If the current line is empty, the text will be printed like with pterm.Print.
 // Example:
-//   pterm.Printo("Hello, World")
-//   time.Sleep(time.Second)
-//   pterm.Printo("Hello, Earth!")
+//
+//	pterm.Printo("Hello, World")
+//	time.Sleep(time.Second)
+//	pterm.Printo("Hello, Earth!")
 func Printo(a ...interface{}) {
 	if !Output {
 		return

@@ -2,6 +2,7 @@ package pterm
 
 import (
 	"io"
+	"sync"
 	"time"
 
 	"github.com/pterm/pterm/internal"
@@ -42,7 +43,8 @@ type SpinnerPrinter struct {
 	TimerRoundingFactor time.Duration
 	TimerStyle          *Style
 
-	IsActive bool
+	IsActive   bool
+	activeLock *sync.Mutex
 
 	startedAt       time.Time
 	currentSequence string
@@ -123,9 +125,18 @@ func (s *SpinnerPrinter) UpdateText(text string) {
 	}
 }
 
+func (s *SpinnerPrinter) isActive() bool {
+	if s.activeLock != nil {
+		s.activeLock.Lock()
+		defer s.activeLock.Unlock()
+	}
+	return s.IsActive
+}
+
 // Start the SpinnerPrinter.
 func (s SpinnerPrinter) Start(text ...interface{}) (*SpinnerPrinter, error) {
 	s.IsActive = true
+	s.activeLock = &sync.Mutex{}
 	s.startedAt = time.Now()
 	activeSpinnerPrinters = append(activeSpinnerPrinters, &s)
 
@@ -138,19 +149,12 @@ func (s SpinnerPrinter) Start(text ...interface{}) (*SpinnerPrinter, error) {
 	}
 
 	go func() {
-		for s.IsActive {
+	OUTER:
+		for {
 			for _, seq := range s.Sequence {
-				if !s.IsActive || RawOutput {
-					continue
+				if !s.printSeq(seq) {
+					break OUTER
 				}
-
-				var timer string
-				if s.ShowTimer {
-					timer = " (" + time.Since(s.startedAt).Round(s.TimerRoundingFactor).String() + ")"
-				}
-				fClearLine(s.Writer)
-				Fprinto(s.Writer, s.Style.Sprint(seq)+" "+s.MessageStyle.Sprint(s.Text)+s.TimerStyle.Sprint(timer))
-				s.currentSequence = seq
 				time.Sleep(s.Delay)
 			}
 		}
@@ -158,9 +162,36 @@ func (s SpinnerPrinter) Start(text ...interface{}) (*SpinnerPrinter, error) {
 	return &s, nil
 }
 
+// Print when IsActive is true.
+func (s *SpinnerPrinter) printSeq(seq string) (isActive bool) {
+	s.activeLock.Lock()
+	defer s.activeLock.Unlock()
+
+	if !s.IsActive {
+		return false
+	}
+	if RawOutput {
+		return true
+	}
+
+	var timer string
+	if s.ShowTimer {
+		timer = " (" + time.Since(s.startedAt).Round(s.TimerRoundingFactor).String() + ")"
+	}
+	fClearLine(s.Writer)
+	Fprinto(s.Writer, s.Style.Sprint(seq)+" "+s.MessageStyle.Sprint(s.Text)+s.TimerStyle.Sprint(timer))
+	s.currentSequence = seq
+	return true
+}
+
 // Stop terminates the SpinnerPrinter immediately.
 // The SpinnerPrinter will not resolve into anything.
 func (s *SpinnerPrinter) Stop() error {
+	if s.activeLock != nil {
+		s.activeLock.Lock()
+		defer s.activeLock.Unlock()
+	}
+
 	if !s.IsActive {
 		return nil
 	}
